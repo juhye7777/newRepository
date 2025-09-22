@@ -1,0 +1,48 @@
+name: Upload MD to Notion
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - "outputs/**/*.md"      # 레포 내부 outputs 폴더의 md에만 트리거
+  workflow_dispatch: {}        # 필요시 수동 실행
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0       # 이전 커밋 비교 위해 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: pip install notion-client pyyaml
+
+      - name: Collect changed MD files
+        id: collect
+        shell: bash
+        run: |
+          BEFORE="${{ github.event.before }}"
+          AFTER="${{ github.sha }}"
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            CHANGED=$(git ls-files 'outputs/**/*.md' || true)
+          else
+            CHANGED=$(git diff --name-only "$BEFORE" "$AFTER" -- 'outputs/**/*.md' || true)
+          fi
+          echo "changed=$CHANGED" >> $GITHUB_OUTPUT
+          printf '%s\n' $CHANGED
+
+      - name: Upload changed MDs to Notion
+        if: steps.collect.outputs.changed != ''
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_PARENT_PAGE_ID: ${{ secrets.NOTION_PARENT_PAGE_ID }}
+          TITLE_PREFIX: "[요약]"
+        run: |
+          python scripts/notion_upload.py ${{ steps.collect.outputs.changed }}
